@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Pasang aturan comment->DM untuk SATU Reels (aturan hanya berlaku di Reels itu).
 
-Pakai:  python3 add_reel.py <link-reels> [--follow] "kata=isi DM" "kata2,kata3=isi DM lain"
+Pakai:  python3 add_reel.py <link-reels> [--follow] [--button=Judul] "kata=isi DM" "kata2,kata3=isi DM lain"
   --follow = orang harus follow dulu (DM pertama berisi tombol, isi DM dikirim setelah dicek follow)
+  --button=Judul = link pertama di isi DM dijadikan tombol (mis. --button="Click The Link")
 Menjalankan ulang untuk Reels yang sama = MENGGANTI aturan lama Reels itu.
 """
 import json, os, re, shutil, subprocess, sys, urllib.request
@@ -32,6 +33,12 @@ def find_media_id(shortcode):
 
 FOLLOW = "--follow" in sys.argv
 sys.argv = [x for x in sys.argv if x != "--follow"]
+BUTTON = None
+for i, x in enumerate(sys.argv):
+    if x.startswith("--button="):
+        BUTTON = x.split("=", 1)[1] or "Buka link"
+        del sys.argv[i]
+        break
 if len(sys.argv) < 3:
     sys.exit(__doc__)
 m = re.search(r"instagram\.com/(?:[^/]+/)?(?:reel|p|reels)/([\w-]+)", sys.argv[1])
@@ -48,6 +55,13 @@ new = []
 for pair in sys.argv[2:]:
     kw, dm = pair.split("=", 1)
     rule = {"keywords": [x.strip() for x in kw.split(",")], "media_id": media_id, "dm": dm}
+    if BUTTON:
+        u = re.search(r"https?://\S+", dm)
+        if u:
+            rule["button_url"], rule["button_title"] = u.group(0), BUTTON
+            rule["dm"] = (dm.replace(u.group(0), "").strip() or BUTTON)
+        else:
+            print(f"PERINGATAN: tidak ada link di DM '{kw}', tombol tidak dibuat.")
     if FOLLOW:
         rule["require_follow"] = True
     new.append(rule)

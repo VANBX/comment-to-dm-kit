@@ -4,8 +4,9 @@ const API = "https://graph.instagram.com/v21.0";
 
 const DEFAULT_GATE = {
   gate_text: "Halo @{username}! Follow akun ini dulu ya, terus tap tombol di bawah buat dapet yang kamu minta 👇",
-  button_label: "Udah follow, kirim!", // maks 20 karakter
-  not_following_text: "Belum kelihatan follow nih 🥲 Follow dulu, terus tap tombol lagi ya 👇",
+  button_label: "Kirim link-nya", // maks 20 karakter
+  not_following_text: "Eist, follow dulu dong 😅 Kalau udah, tap tombol di bawah ya 👇",
+  recheck_label: "Udah follow", // maks 20 karakter
   fallback_text: "Halo @{username}! Follow akun ini dulu ya, terus balas pesan ini dengan kata KIRIM biar aku kirim yang kamu minta.",
   error_text: "Lagi ada gangguan ngecek follow, coba tap tombolnya lagi sebentar lagi ya 🙏",
 };
@@ -94,7 +95,42 @@ async function graphGet(env, path) {
   return [res.status, await res.json().catch(() => ({}))];
 }
 
-const quickReply = (g, payload) => [{ content_type: "text", title: g.button_label, payload }];
+// --- bentuk pesan ---
+const buttonTemplate = (text, buttons) => ({
+  attachment: { type: "template", payload: { template_type: "button", text, buttons } },
+});
+const postbackButton = (title, payload) => ({ type: "postback", title, payload });
+const urlButton = (title, url) => ({ type: "web_url", url, title });
+
+const sendMsg = (env, recipient, message) =>
+  graphPost(env, `${env.IG_USER_ID}/messages`, { recipient, message });
+
+// Pesan dengan satu tombol balasan. Urutan percobaan: tombol di bubble (template) ->
+// quick reply -> teks biasa. Mengembalikan [status, res, mode].
+async function sendInteractive(env, recipient, text, label, payload, fallbackText) {
+  let r = await sendMsg(env, recipient, buttonTemplate(text, [postbackButton(label, payload)]));
+  if (r[0] === 200) return [...r, "template"];
+  r = await sendMsg(env, recipient, {
+    text, quick_replies: [{ content_type: "text", title: label, payload }],
+  });
+  if (r[0] === 200) return [...r, "quick_reply"];
+  r = await sendMsg(env, recipient, { text: fallbackText });
+  return [...r, "text"];
+}
+
+// Isi DM dari aturan. Kalau ada button_url: tombol link di bubble (fallback: link di teks).
+async function sendRuleDm(env, recipient, rule, username) {
+  const text = fill(rule.dm, username);
+  if (rule.button_url) {
+    const title = rule.button_title || "Buka link";
+    const r = await sendMsg(env, recipient, buttonTemplate(text || title, [urlButton(title, rule.button_url)]));
+    if (r[0] === 200) return [...r, "template"];
+    const r2 = await sendMsg(env, recipient, { text: `${text}\n${rule.button_url}`.trim() });
+    return [...r2, "text"];
+  }
+  const r = await sendMsg(env, recipient, { text });
+  return [...r, "text"];
+}
 
 async function handleComment(v, env) {
   const cid = v.id;
@@ -112,11 +148,11 @@ async function handleComment(v, env) {
   if (rule.require_follow) {
     await sendGate(env, cfg, rule, kw, cid, user);
   } else {
-    const dm = fill(rule.dm, user.username);
-    if (!env.ACCESS_TOKEN) return log({ event: "dry_run_dm", comment_id: cid, user: user.username, dm });
-    const [st, res] = await graphPost(env, `${env.IG_USER_ID}/messages`,
-      { recipient: { comment_id: cid }, message: { text: dm } });
-    log({ event: "dm", status: st, comment_id: cid, user: user.username, res });
+    if (!env.ACCESS_TOKEN) {
+      return log({ event: "dry_run_dm", comment_id: cid, user: user.username, dm: fill(rule.dm, user.username) });
+    }
+    const [st, res, mode] = await sendRuleDm(env, { comment_id: cid }, rule, user.username);
+    log({ event: "dm", mode, status: st, comment_id: cid, user: user.username, res });
     if (st !== 200) return;
   }
 
@@ -134,18 +170,8 @@ async function sendGate(env, cfg, rule, kw, cid, user) {
   if (!env.ACCESS_TOKEN) {
     return log({ event: "dry_run_gate", comment_id: cid, user: user.username, text: fill(g.gate_text, user.username) });
   }
-  let mode = "buttons";
-  let [st, res] = await graphPost(env, `${env.IG_USER_ID}/messages`, {
-    recipient: { comment_id: cid },
-    message: { text: fill(g.gate_text, user.username), quick_replies: quickReply(g, payload) },
-  });
-  if (st !== 200) {
-    mode = "text";
-    [st, res] = await graphPost(env, `${env.IG_USER_ID}/messages`, {
-      recipient: { comment_id: cid },
-      message: { text: fill(g.fallback_text, user.username) },
-    });
-  }
+  const [st, res, mode] = await sendInteractive(env, { comment_id: cid },
+    fill(g.gate_text, user.username), g.button_label, payload, fill(g.fallback_text, user.username));
   log({ event: "gate", mode, status: st, comment_id: cid, user: user.username, res });
   if (st === 200) {
     const rid = res.recipient_id || user.id;
@@ -153,10 +179,11 @@ async function sendGate(env, cfg, rule, kw, cid, user) {
   }
 }
 
-// Orang membalas (tap tombol atau ketik) -> cek follow -> kirim isi DM atau minta follow
+// Orang membalas (tap tombol / quick reply / ketik) -> cek follow -> kirim isi DM atau minta follow
 async function handleMessage(m, env) {
   const sender = m.sender && m.sender.id;
-  const msg = m.message;
+  // tap tombol template datang sebagai "postback", quick reply sebagai "message"
+  const msg = m.message || (m.postback && { mid: m.postback.mid, quick_reply: { payload: m.postback.payload } });
   if (!sender || !msg || msg.is_echo || sender === env.IG_USER_ID) return;
   if (msg.mid) {
     if (await env.STORE.get(`mid:${msg.mid}`)) return;
@@ -181,26 +208,21 @@ async function handleMessage(m, env) {
   const payload = `g|${target.media_id}|${target.kw}`;
   if (!env.ACCESS_TOKEN) return log({ event: "dry_run_gate_reply", sender, kw: target.kw });
 
-  const send = (text, withButton) => graphPost(env, `${env.IG_USER_ID}/messages`, {
-    recipient: { id: sender },
-    message: withButton ? { text, quick_replies: quickReply(g, payload) } : { text },
-  });
-
   const [pst, prof] = await graphGet(env, `${sender}?fields=username,is_user_follow_business`);
   if (pst !== 200 || typeof prof.is_user_follow_business !== "boolean") {
     log({ event: "follow_check_error", status: pst, sender, res: prof });
-    const [st, res] = await send(g.error_text, true);
-    return log({ event: "error_reply", status: st, res });
+    const [st, res, mode] = await sendInteractive(env, { id: sender }, g.error_text, g.recheck_label, payload, g.error_text);
+    return log({ event: "error_reply", mode, status: st, res });
   }
   if (!prof.is_user_follow_business) {
-    const [st, res] = await send(g.not_following_text, true);
-    return log({ event: "not_following", status: st, sender, user: prof.username, res });
+    const [st, res, mode] = await sendInteractive(env, { id: sender }, g.not_following_text, g.recheck_label, payload, g.not_following_text);
+    return log({ event: "not_following", mode, status: st, sender, user: prof.username, res });
   }
 
   const sentKey = `sent:${sender}:${target.media_id}:${target.kw}`;
   if (await env.STORE.get(sentKey)) return;
-  const [st, res] = await send(fill(rule.dm, prof.username), false);
-  log({ event: "dm_after_follow", status: st, sender, user: prof.username, res });
+  const [st, res, mode] = await sendRuleDm(env, { id: sender }, rule, prof.username);
+  log({ event: "dm_after_follow", mode, status: st, sender, user: prof.username, res });
   if (st === 200) {
     await env.STORE.put(sentKey, "1", { expirationTtl: 8 * 86400 });
     await env.STORE.delete(`gate:${sender}`);

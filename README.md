@@ -60,22 +60,30 @@ python3 add_reel.py "https://www.instagram.com/reel/XXXX/" "mantap=Thank you" "l
 - `{username}` di isi DM otomatis diganti username pengomen.
 - Ganti balasan publik: edit `public_reply` di `config.json`, lalu jalankan `add_reel.py` sekali lagi.
 
-## Wajib follow (opsional per aturan)
-Tambahkan `--follow` supaya orang harus follow dulu sebelum dapat isi DM:
+## Tombol link dan wajib follow (opsional per aturan)
+**Tombol link** (`--button`): link pertama di isi DM dijadikan tombol di dalam bubble, mirip "Click The Link".
 ```bash
-python3 add_reel.py "https://www.instagram.com/reel/XXXX/" --follow "member=Ini link member: https://..."
+python3 add_reel.py "https://www.instagram.com/reel/XXXX/" --button="Click The Link" "panduan=Nih panduannya, gratis 👇 https://contoh.com/guide"
+```
+
+**Wajib follow** (`--follow`): orang harus follow dulu sebelum dapat isi DM.
+```bash
+python3 add_reel.py "https://www.instagram.com/reel/XXXX/" --follow --button="Click The Link" "member=Nih panduannya, gratis 👇 https://contoh.com/guide"
 ```
 Alurnya:
-1. Orang comment kata trigger → bot kirim DM pertama berisi teks dan tombol **"Udah follow, kirim!"**.
+1. Orang comment kata trigger → DM pertama berisi teks dan tombol **"Kirim link-nya"**.
 2. Orang tap tombol → bot cek `is_user_follow_business` lewat Instagram API.
-3. Sudah follow → isi DM dikirim. Belum follow → bot minta follow dulu dan menampilkan tombol lagi.
+3. Sudah follow → isi DM (dengan tombol link) dikirim. Belum follow → "Eist, follow dulu dong 😅" dan tombol **"Udah follow"**. Tap lagi → dicek ulang, lalu dikirim kalau sudah follow.
+4. Tap berulang tidak mengirim DM dobel.
+
+Rantai fallback (otomatis), karena Meta resminya hanya mendokumentasikan teks untuk DM pertama:
+- Tombol di bubble (template) → kalau ditolak, **quick reply** → kalau ditolak lagi, **teks** "balas dengan kata KIRIM". Pesan akhir dengan tombol link yang ditolak jadi teks berisi link.
 
 Hal yang perlu kamu tahu:
-- DM pertama (private reply) resminya cuma teks. Kalau Meta menolak tombol, bot otomatis **fallback**: orang diminta membalas dengan kata **KIRIM**.
 - Cek follow baru diizinkan Meta **setelah orang membalas** DM kamu (tap tombol atau mengetik).
-- Orang yang belum follow menerima DM di **Message Requests**, tampilan tombol di folder itu belum tentu sama. Tes pakai akun yang benar-benar belum follow.
-- Pastikan field webhook `messages` berstatus **Subscribed** (di Langkah 3).
-- Ubah teksnya lewat `follow_gate` di `config.json` (`gate_text`, `button_label` maks 20 karakter, `not_following_text`, `fallback_text`, `error_text`). Bisa diatur global atau per aturan.
+- Orang yang belum follow menerima DM di **Message Requests**; tampilan tombol di folder itu belum tentu sama. Tes pakai akun yang benar-benar belum follow.
+- Field webhook `messages` dan `messaging_postbacks` harus **Subscribed** (biasanya sudah otomatis).
+- Ubah teks lewat `follow_gate` di `config.json`: `gate_text`, `button_label` (maks 20 karakter), `not_following_text`, `recheck_label` (maks 20), `fallback_text`, `error_text`. Bisa global atau per aturan.
 
 ## Batasan dan hal penting
 - **1 comment = 1 DM**, dan harus dalam 7 hari sejak comment.
