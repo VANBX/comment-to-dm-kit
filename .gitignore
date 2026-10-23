@@ -1,0 +1,7 @@
+.env
+.dev.vars
+config.json
+worker/config.json
+node_modules/
+.wrangler/
+*.out

@@ -1,0 +1,6 @@
+{
+  "name": "comment-to-dm-worker",
+  "private": true,
+  "scripts": { "deploy": "wrangler deploy", "tail": "wrangler tail" },
+  "devDependencies": { "wrangler": "^4.0.0" }
+}

@@ -1,0 +1,8 @@
+name = "comment-to-dm"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Isi id ini setelah: npx wrangler kv namespace create STORE
+[[kv_namespaces]]
+binding = "STORE"
+id = "GANTI_DENGAN_ID_KV_KAMU"
