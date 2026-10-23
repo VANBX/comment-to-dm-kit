@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Pasang aturan comment->DM untuk SATU Reels (aturan hanya berlaku di Reels itu).
 
-Pakai:  python3 add_reel.py <link-reels> "kata=isi DM" "kata2,kata3=isi DM lain"
+Pakai:  python3 add_reel.py <link-reels> [--follow] "kata=isi DM" "kata2,kata3=isi DM lain"
+  --follow = orang harus follow dulu (DM pertama berisi tombol, isi DM dikirim setelah dicek follow)
 Menjalankan ulang untuk Reels yang sama = MENGGANTI aturan lama Reels itu.
 """
 import json, os, re, shutil, subprocess, sys, urllib.request
@@ -29,6 +30,8 @@ def find_media_id(shortcode):
     sys.exit("Reels tidak ketemu di akun ini. Cek link-nya.")
 
 
+FOLLOW = "--follow" in sys.argv
+sys.argv = [x for x in sys.argv if x != "--follow"]
 if len(sys.argv) < 3:
     sys.exit(__doc__)
 m = re.search(r"instagram\.com/(?:[^/]+/)?(?:reel|p|reels)/([\w-]+)", sys.argv[1])
@@ -44,7 +47,10 @@ cfg = json.loads(cfg_path.read_text())
 new = []
 for pair in sys.argv[2:]:
     kw, dm = pair.split("=", 1)
-    new.append({"keywords": [x.strip() for x in kw.split(",")], "media_id": media_id, "dm": dm})
+    rule = {"keywords": [x.strip() for x in kw.split(",")], "media_id": media_id, "dm": dm}
+    if FOLLOW:
+        rule["require_follow"] = True
+    new.append(rule)
 cfg["rules"] = [r for r in cfg["rules"] if r.get("media_id") != media_id] + new
 cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
 print(f"OK: {len(new)} aturan untuk media {media_id}")
